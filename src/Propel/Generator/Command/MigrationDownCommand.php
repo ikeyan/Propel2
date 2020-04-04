@@ -35,6 +35,7 @@ class MigrationDownCommand extends AbstractCommand
             ->addOption('connection',       null, InputOption::VALUE_IS_ARRAY | InputOption::VALUE_REQUIRED, 'Connection to use', [])
             ->addOption('fake',             null, InputOption::VALUE_NONE, 'Does not touch the actual schema, but marks previous migration as executed.')
             ->addOption('force',            null, InputOption::VALUE_NONE, 'Continues with the migration even when errors occur.')
+            ->addOption('migration-file',   null, InputOption::VALUE_REQUIRED, 'The timestamp, class name or file path of the migration to rollback')
             ->setName('migration:down')
             ->setAliases(['down'])
             ->setDescription('Execute migrations down')
@@ -79,11 +80,25 @@ class MigrationDownCommand extends AbstractCommand
         $manager->setWorkingDirectory($generatorConfig->getSection('paths')['migrationDir']);
 
         $previousTimestamps = $manager->getAlreadyExecutedMigrationTimestamps();
-        $nextMigrationTimestamp = array_pop($previousTimestamps);
-        if (!$nextMigrationTimestamp) {
-            $output->writeln('No migration were ever executed on this database - nothing to reverse.');
+        if ($this->hasInputOption('migration-file', $input)) {
+            $migrationTimestamp = $input->getOption('migration-file');
+            // foobar/PropelMigration_1234.php or 1234 -> 1234
+            $migrationTimestamp = array_slice(explode('PropelMigration_', $migrationTimestamp), -1)[0];
+            $migrationTimestamp = substr($migrationTimestamp, 0, strcspn($migrationTimestamp, "_."));
+            if (!ctype_digit($migrationTimestamp) || !in_array((int)$migrationTimestamp, $previousTimestamps, true)) {
+                $output->writeln("<error>The migration {$migrationTimestamp} was never executed on this database</error>");
 
-            return false;
+                return false;
+            }
+            $nextMigrationTimestamp = (int)$migrationTimestamp;
+            $previousTimestamps = array_values(array_diff($previousTimestamps, [$nextMigrationTimestamp]));
+        } else {
+            $nextMigrationTimestamp = array_pop($previousTimestamps);
+            if (!$nextMigrationTimestamp) {
+                $output->writeln('No migration were ever executed on this database - nothing to reverse.');
+
+                return false;
+            }
         }
 
         $output->writeln(sprintf(
